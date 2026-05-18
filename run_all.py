@@ -42,11 +42,11 @@ def check_prerequisites():
     print(f"✓ Python {sys.version.split()[0]}")
     
     # Check OpenAI API key
-    if not os.environ.get('OPENAI_API_KEY'):
-        issues.append("OPENAI_API_KEY tidak di-set")
-        print("✗ OPENAI_API_KEY: TIDAK ADA")
+    if not os.environ.get('GEMINI_API_KEY'):
+        issues.append("GEMINI_API_KEY tidak di-set")
+        print("✗ GEMINI_API_KEY: TIDAK ADA")
     else:
-        print("✓ OPENAI_API_KEY: Ada")
+        print("✓ GEMINI_API_KEY: Ada")
     
     # Check Semgrep
     result = subprocess.run(['semgrep', '--version'], capture_output=True, text=True)
@@ -57,7 +57,7 @@ def check_prerequisites():
         print(f"✓ Semgrep: {result.stdout.strip()}")
     
     # Check required Python packages
-    required_packages = ['openai', 'rich']
+    required_packages = ['google', 'rich']
     for pkg in required_packages:
         try:
             __import__(pkg)
@@ -96,9 +96,13 @@ Contoh:
         """
     )
     
-    parser.add_argument('--model', default='gpt-4o', help='Model OpenAI (default: gpt-4o)')
-    parser.add_argument('--target', default='vulnerable-samples/', help='Direktori target')
-    parser.add_argument('--output', default='results/', help='Direktori output')
+    parser.add_argument(
+        '--model',
+        default='gemini-2.5-flash',
+        help='Gemini model (default: gemini-2.5-flash)'
+    )
+    parser.add_argument('--target', default='sast-llm/vulnerable-samples/', help='Direktori target')
+    parser.add_argument('--output', default='sast-llm/results/', help='Direktori output')
     parser.add_argument('--only-llm', action='store_true', help='Hanya jalankan LLM scan')
     parser.add_argument('--only-semgrep', action='store_true', help='Hanya jalankan Semgrep')
     parser.add_argument('--only-compare', action='store_true', help='Hanya buat laporan perbandingan')
@@ -125,9 +129,9 @@ Contoh:
     run_semgrep = not args.only_llm and not args.only_compare
     run_compare = not args.only_llm and not args.only_semgrep
     
-    llm_output = f"{args.output}/llm_results.json"
-    semgrep_output = f"{args.output}/semgrep_full_results.json"
-    comparison_output = f"{args.output}/comparison_report.html"
+    llm_output = f"{args.output}llm_results.json"
+    semgrep_output = f"{args.output}semgrep_full_results.json"
+    comparison_output = f"{args.output}comparison_report.html"
     
     # ─────────────────────────────────────────────
     # STEP 1: LLM SAST Scan
@@ -142,7 +146,7 @@ Contoh:
         
         rc, _ = run_command(
             [
-                sys.executable, 'llm-sast/analyzer.py',
+                sys.executable, 'sast-llm/llm-sast/analyzer.py',
                 '--dir', args.target,
                 '--model', args.model,
                 '--output', llm_output,
@@ -176,7 +180,7 @@ Contoh:
                     '--config', 'p/python',
                     '--config', 'p/javascript',
                     '--config', 'p/secrets',
-                    '--config', 'semgrep-sast/rules/',
+                    '--config', 'sast-llm/semgrep-sast/rules/',
                     '--json',
                     '--output', semgrep_output,
                     '--metrics=off',
@@ -197,6 +201,10 @@ Contoh:
         print("\n" + "─"*60)
         print("LANGKAH 3: Comparison Report")
         print("─"*60)
+    
+        llm_output = f"results/llm_results.json"
+        semgrep_output = f"results/semgrep_full_results.json"
+        comparison_output = f"results/comparison_report.html"
         
         # Cek apakah file hasil ada
         llm_exists = Path(llm_output).exists()
@@ -213,7 +221,7 @@ Contoh:
         if llm_exists and semgrep_exists:
             rc, _ = run_command(
                 [
-                    sys.executable, 'comparison/compare.py',
+                    sys.executable, 'sast-llm/comparison/compare.py',
                     '--llm', llm_output,
                     '--semgrep', semgrep_output,
                     '--output', comparison_output,

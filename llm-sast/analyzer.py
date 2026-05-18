@@ -11,7 +11,11 @@ import time
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Optional
-from openai import OpenAI
+# from openai import OpenAI
+from google import genai
+from google.genai import types
+
+
 
 
 @dataclass
@@ -105,7 +109,7 @@ def read_file_with_line_numbers(filepath: str) -> str:
     return '\n'.join(numbered_lines), len(lines)
 
 
-def analyze_file(client: OpenAI, filepath: str, model: str = "gpt-4o") -> AnalysisResult:
+def analyze_file(client, filepath: str, model: str = "gemini-2.5-flash") -> AnalysisResult:
     """Analisis satu file menggunakan LLM"""
     print(f"  Menganalisis: {filepath}")
     
@@ -127,21 +131,32 @@ Berikan hasil analisis dalam format JSON array. Setiap elemen adalah satu vulner
     start_time = time.time()
     
     try:
-        response = client.chat.completions.create(
+        response = client.models.generate_content(
             model=model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.1,  # Rendah untuk konsistensi
+            contents=f"""
+        {SYSTEM_PROMPT}
+
+        {user_prompt}
+        """,
+            config=types.GenerateContentConfig(
+                temperature=0.1,
+                response_mime_type="application/json",
+            )
         )
         
         duration = time.time() - start_time
-        tokens_used = response.usage.total_tokens
+        tokens_used = response.usage_metadata.total_token_count
         
         # Parse response
-        response_text = response.choices[0].message.content
+        response_text = response.text
+        response_text = response.text.strip()
+
+        response_text = (
+            response_text
+            .replace("```json", "")
+            .replace("```", "")
+            .strip()
+        )
         parsed = json.loads(response_text)
         
         # Handle berbagai format response
@@ -205,10 +220,10 @@ Berikan hasil analisis dalam format JSON array. Setiap elemen adalah satu vulner
 
 
 def scan_directory(
-    client: OpenAI,
+    client,
     directory: str,
     extensions: list[str] | None = None,
-    model: str = "gpt-4o"
+    model: str = "gemini-2.5-flash"
 ) -> list[AnalysisResult]:
     """Scan semua file dalam direktori"""
     if extensions is None:
@@ -304,7 +319,7 @@ Contoh penggunaan:
   python analyzer.py --dir vulnerable-samples/
 
   # Gunakan model tertentu dan simpan output
-  python analyzer.py --dir vulnerable-samples/ --model gpt-4o --output results/llm_results.json
+  python analyzer.py --dir vulnerable-samples/ --model gemini-2.5-flash --output results/llm_results.json
         """
     )
     
@@ -314,9 +329,12 @@ Contoh penggunaan:
     
     parser.add_argument(
         '--model',
-        default='gpt-4o',
-        choices=['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-        help='Model OpenAI yang digunakan (default: gpt-4o)'
+        default='gemini-2.5-flash',
+        choices=[
+            'gemini-2.5-flash',
+            'gemini-2.5-pro'
+        ],
+        help='Model Gemini yang digunakan (default: gemini-2.5-flash)'
     )
     parser.add_argument(
         '--output',
@@ -333,13 +351,13 @@ Contoh penggunaan:
     args = parser.parse_args()
     
     # Setup OpenAI client
-    api_key = os.environ.get('OPENAI_API_KEY')
+    api_key = os.environ.get('GEMINI_API_KEY')
     if not api_key:
-        print("Error: OPENAI_API_KEY environment variable tidak ditemukan!")
-        print("Set dengan: export OPENAI_API_KEY='your-api-key'")
+        print("Error: GEMINI_API_KEY environment variable tidak ditemukan!")
+        print("Set dengan: export GEMINI_API_KEY='your-api-key'")
         exit(1)
     
-    client = OpenAI(api_key=api_key)
+    client = genai.Client(api_key=api_key)
     
     print("=" * 60)
     print("LLM-based SAST Analyzer")
