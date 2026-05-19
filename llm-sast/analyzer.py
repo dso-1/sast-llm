@@ -11,12 +11,10 @@ import time
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Optional
-# from openai import OpenAI
-from google import genai
-from google.genai import types
-
-
-
+from json_repair import repair_json
+from openai import OpenAI
+# from google import genai
+# from google.genai import types
 
 @dataclass
 class Vulnerability:
@@ -109,7 +107,11 @@ def read_file_with_line_numbers(filepath: str) -> str:
     return '\n'.join(numbered_lines), len(lines)
 
 
-def analyze_file(client, filepath: str, model: str = "gemini-2.5-flash") -> AnalysisResult:
+def analyze_file(
+    client,
+    filepath: str,
+    model: str = "qwen/qwen3-coder-480b-a35b-instruct"
+) -> AnalysisResult:
     """Analisis satu file menggunakan LLM"""
     print(f"  Menganalisis: {filepath}")
     
@@ -129,82 +131,128 @@ Total baris: {total_lines}
 Berikan hasil analisis dalam format JSON array. Setiap elemen adalah satu vulnerability."""
 
     start_time = time.time()
-    
+    max_retries = 3
+
     try:
-        response = client.models.generate_content(
-            model=model,
-            contents=f"""
-        {SYSTEM_PROMPT}
 
-        {user_prompt}
-        """,
-            config=types.GenerateContentConfig(
-                temperature=0.1,
-                response_mime_type="application/json",
-            )
-        )
-        
-        duration = time.time() - start_time
-        tokens_used = response.usage_metadata.total_token_count
-        
-        # Parse response
-        response_text = response.text
-        response_text = response.text.strip()
+        for attempt in range(max_retries):
 
-        response_text = (
-            response_text
-            .replace("```json", "")
-            .replace("```", "")
-            .strip()
-        )
-        parsed = json.loads(response_text)
-        
-        # Handle berbagai format response
-        if isinstance(parsed, list):
-            vulns_raw = parsed
-        elif isinstance(parsed, dict):
-            # LLM mungkin membungkus dalam key
-            vulns_raw = (
-                parsed.get('vulnerabilities') or
-                parsed.get('findings') or
-                parsed.get('results') or
-                []
-            )
-        else:
-            vulns_raw = []
-        
-        vulnerabilities = []
-        for v in vulns_raw:
             try:
-                vuln = Vulnerability(
-                    file=filepath,
-                    line_start=int(v.get('line_start', 0)),
-                    line_end=int(v.get('line_end', 0)),
-                    severity=v.get('severity', 'MEDIUM').upper(),
-                    category=v.get('category', 'Unknown'),
-                    cwe_id=v.get('cwe_id', ''),
-                    title=v.get('title', ''),
-                    description=v.get('description', ''),
-                    vulnerable_code=v.get('vulnerable_code', ''),
-                    remediation=v.get('remediation', ''),
-                    confidence=v.get('confidence', 'MEDIUM').upper(),
+
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": SYSTEM_PROMPT
+                        },
+                        {
+                            "role": "user",
+                            "content": user_prompt
+                        }
+                    ],
+                    temperature=0.1,
+                    timeout=120,
                 )
-                vulnerabilities.append(vuln)
-            except (KeyError, ValueError) as e:
-                print(f"    Warning: Gagal parse vulnerability: {e}")
-        
-        return AnalysisResult(
-            file=filepath,
-            language=language,
-            total_lines=total_lines,
-            vulnerabilities=vulnerabilities,
-            scan_duration_seconds=round(duration, 2),
-            model_used=model,
-            tokens_used=tokens_used,
-        )
-    
-    except json.JSONDecodeError as e:
-        print(f"    Error: Gagal parse JSON response: {e}")
+
+                duration = time.time() - start_time
+                tokens_used = (
+                    response.usage.total_tokens
+                    if response.usage
+                    else 0
+                )
+
+                # Parse response
+                response_text = response.choices[0].message.content
+
+                response_text = (
+                    response_text
+                    .replace("```json", "")
+                    .replace("```", "")
+                    .strip()
+                )
+
+                try:
+                    parsed = json.loads(response_text)
+
+                except json.JSONDecodeError:
+
+                    repaired = repair_json(response_text)
+
+                    parsed = json.loads(repaired)
+
+                # Handle berbagai format response
+                if isinstance(parsed, list):
+                    vulns_raw = parsed
+
+                elif isinstance(parsed, dict):
+                    vulns_raw = (
+                        parsed.get('vulnerabilities')
+                        or parsed.get('findings')
+                        or parsed.get('results')
+                        or []
+                    )
+
+                else:
+                    vulns_raw = []
+
+                vulnerabilities = []
+
+                for v in vulns_raw:
+
+                    try:
+
+                        vuln = Vulnerability(
+                            file=filepath,
+                            line_start=int(v.get('line_start', 0)),
+                            line_end=int(v.get('line_end', 0)),
+                            severity=v.get('severity', 'MEDIUM').upper(),
+                            category=v.get('category', 'Unknown'),
+                            cwe_id=v.get('cwe_id', ''),
+                            title=v.get('title', ''),
+                            description=v.get('description', ''),
+                            vulnerable_code=v.get('vulnerable_code', ''),
+                            remediation=v.get('remediation', ''),
+                            confidence=v.get('confidence', 'MEDIUM').upper(),
+                        )
+
+                        vulnerabilities.append(vuln)
+
+                    except (KeyError, ValueError) as e:
+                        print(f"    Warning: Gagal parse vulnerability: {e}")
+
+                return AnalysisResult(
+                    file=filepath,
+                    language=language,
+                    total_lines=total_lines,
+                    vulnerabilities=vulnerabilities,
+                    scan_duration_seconds=round(duration, 2),
+                    model_used=model,
+                    tokens_used=tokens_used,
+                )
+
+            except json.JSONDecodeError as e:
+
+                print(f"    Error parse JSON: {e}")
+
+                if attempt == max_retries - 1:
+                    raise
+
+                time.sleep(2)
+
+            except Exception as e:
+
+                print(f"    Retry {attempt+1}/{max_retries}: {e}")
+
+                if attempt == max_retries - 1:
+                    raise
+
+                time.sleep(3)
+
+    except Exception as e:
+
+        print(f"    Error menganalisis {filepath}: {e}")
+
         return AnalysisResult(
             file=filepath,
             language=language,
@@ -214,16 +262,13 @@ Berikan hasil analisis dalam format JSON array. Setiap elemen adalah satu vulner
             model_used=model,
             tokens_used=0,
         )
-    except Exception as e:
-        print(f"    Error menganalisis {filepath}: {e}")
-        raise
 
 
 def scan_directory(
     client,
     directory: str,
     extensions: list[str] | None = None,
-    model: str = "gemini-2.5-flash"
+    model: str = "qwen/qwen3-coder-480b-a35b-instruct"
 ) -> list[AnalysisResult]:
     """Scan semua file dalam direktori"""
     if extensions is None:
@@ -232,7 +277,22 @@ def scan_directory(
     results = []
     path = Path(directory)
     
-    files = [f for f in path.rglob('*') if f.is_file() and f.suffix in extensions]
+    IGNORE_PATTERNS = [
+        'commitlint',
+        'vite.config',
+        'tailwind.config',
+        '.spec.',
+        '.test.',
+    ]
+
+    files = [
+        f for f in path.rglob('*')
+        if (
+            f.is_file()
+            and f.suffix in extensions
+            and not any(p in str(f) for p in IGNORE_PATTERNS)
+        )
+    ]
     
     print(f"\nMenemukan {len(files)} file untuk dianalisis...")
     print("-" * 60)
@@ -319,7 +379,7 @@ Contoh penggunaan:
   python analyzer.py --dir vulnerable-samples/
 
   # Gunakan model tertentu dan simpan output
-  python analyzer.py --dir vulnerable-samples/ --model gemini-2.5-flash --output results/llm_results.json
+  python analyzer.py --dir vulnerable-samples/ --model qwen/qwen3-coder-480b-a35b-instruct --output results/llm_results.json
         """
     )
     
@@ -329,12 +389,14 @@ Contoh penggunaan:
     
     parser.add_argument(
         '--model',
-        default='gemini-2.5-flash',
+        default='qwen/qwen3-coder-480b-a35b-instruct',
         choices=[
-            'gemini-2.5-flash',
-            'gemini-2.5-pro'
+            'qwen/qwen3-coder-480b-a35b-instruct',
+            'deepseek-ai/deepseek-v4-pro',
+            'meta/llama-3.3-70b-instruct',
+            'mistralai/codestral-22b-instruct-v0.1',
         ],
-        help='Model Gemini yang digunakan (default: gemini-2.5-flash)'
+        help='Model Gemini yang digunakan (default: qwen3-coder)'
     )
     parser.add_argument(
         '--output',
@@ -351,13 +413,16 @@ Contoh penggunaan:
     args = parser.parse_args()
     
     # Setup OpenAI client
-    api_key = os.environ.get('GEMINI_API_KEY')
+    api_key = os.environ.get('NVIDIA_API_KEY')
     if not api_key:
-        print("Error: GEMINI_API_KEY environment variable tidak ditemukan!")
-        print("Set dengan: export GEMINI_API_KEY='your-api-key'")
+        print("Error: NVIDIA_API_KEY environment variable tidak ditemukan!")
+        print("Set dengan: export NVIDIA_API_KEY='nvapi-xxxx'")
         exit(1)
     
-    client = genai.Client(api_key=api_key)
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://integrate.api.nvidia.com/v1"
+    )
     
     print("=" * 60)
     print("LLM-based SAST Analyzer")

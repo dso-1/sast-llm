@@ -42,11 +42,11 @@ def check_prerequisites():
     print(f"✓ Python {sys.version.split()[0]}")
     
     # Check OpenAI API key
-    if not os.environ.get('GEMINI_API_KEY'):
-        issues.append("GEMINI_API_KEY tidak di-set")
-        print("✗ GEMINI_API_KEY: TIDAK ADA")
+    if not os.environ.get('NVIDIA_API_KEY'):
+        issues.append("NVIDIA_API_KEY tidak di-set")
+        print("✗ NVIDIA_API_KEY: TIDAK ADA")
     else:
-        print("✓ GEMINI_API_KEY: Ada")
+        print("✓ NVIDIA_API_KEY: Ada")
     
     # Check Semgrep
     result = subprocess.run(['semgrep', '--version'], capture_output=True, text=True)
@@ -57,7 +57,7 @@ def check_prerequisites():
         print(f"✓ Semgrep: {result.stdout.strip()}")
     
     # Check required Python packages
-    required_packages = ['google', 'rich']
+    required_packages = ['openai', 'rich']
     for pkg in required_packages:
         try:
             __import__(pkg)
@@ -98,8 +98,14 @@ Contoh:
     
     parser.add_argument(
         '--model',
-        default='gemini-2.5-flash',
-        help='Gemini model (default: gemini-2.5-flash)'
+        default='qwen/qwen3-coder-480b-a35b-instruct',
+        choices=[
+            'qwen/qwen3-coder-480b-a35b-instruct',
+            'deepseek-ai/deepseek-v4-pro',
+            'meta/llama-3.3-70b-instruct',
+            'mistralai/codestral-22b-instruct-v0.1',
+        ],
+        help='LLM model (default: qwen/qwen3-coder-480b-a35b-instruct)'
     )
     parser.add_argument('--target', default='sast-llm/vulnerable-samples/', help='Direktori target')
     parser.add_argument('--output', default='sast-llm/results/', help='Direktori output')

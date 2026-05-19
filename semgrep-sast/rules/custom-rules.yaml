@@ -1,0 +1,152 @@
+rules:
+  - id: hardcoded-api-key
+    languages:
+      - typescript
+      - javascript
+    severity: ERROR
+    message: Hardcoded API key / secret detected.
+    patterns:
+      - pattern-either:
+          - pattern: |
+              const $KEY = "..."
+          - pattern: |
+              const $KEY = '...'
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: (?i).*(secret|token|apikey|api_key|password|passwd|jwt|auth).*
+  
+  - id: fetch-without-try-catch
+    languages:
+      - typescript
+    severity: WARNING
+    message: fetch() used without try/catch error handling.
+    patterns:
+      - pattern: |
+          await fetch(...)
+      - pattern-not-inside: |
+          try {
+            ...
+          } catch (...) {
+            ...
+          }
+
+  - id: upload-without-mime-validation
+    languages:
+      - typescript
+    severity: ERROR
+    message: File upload detected without MIME/content-type validation.
+    paths:
+      include:
+        - "**upload**"
+        - "**uploads**"
+    patterns:
+      - pattern: |
+          formData.append(...)
+      - pattern-not: |
+          if ($FILE.type === ...)
+
+  - id: react-dangerously-set-inner-html
+    languages:
+      - javascript
+      - typescript
+    severity: ERROR
+    message: dangerouslySetInnerHTML may lead to XSS.
+    patterns:
+      - pattern: |
+          dangerouslySetInnerHTML={{ __html: $HTML }}
+
+  - id: prisma-query-raw
+    languages:
+      - typescript
+    severity: ERROR
+    message: Avoid prisma.$queryRaw due to SQL injection risk.
+    pattern-either:
+      - pattern: prisma.$queryRaw(...)
+      - pattern: prisma.$executeRaw(...)
+
+  - id: console-log-production
+    languages:
+      - typescript
+      - javascript
+    severity: INFO
+    message: Console logging may leak sensitive information.
+    patterns:
+      - pattern: console.log(...)
+      - pattern-regex: password|token|jwt|secret
+
+  - id: insecure-http-url
+    languages:
+      - typescript
+      - javascript
+    severity: ERROR
+    message: Insecure HTTP endpoint detected.
+    pattern-regex: '(http://(?!www\\.w3\\.org))'
+
+  - id: api-request-without-auth-header
+    languages:
+      - typescript
+    severity: WARNING
+    message: API request without Authorization header.
+    patterns:
+      - pattern: |
+          fetch($URL, {
+            ...
+          })
+      - pattern-not: |
+          fetch($URL, {
+            headers: {
+              Authorization: ...,
+              ...
+            },
+            ...
+          })
+
+  - id: user-input-in-url
+    languages:
+      - typescript
+    severity: ERROR
+    message: User input directly concatenated into URL.
+    patterns:
+      - pattern-either:
+          - pattern: |
+              fetch("..." + $INPUT)
+          - pattern: |
+              fetch(`${$INPUT}`)
+
+  - id: admin-route-without-role-validation
+    languages:
+      - typescript
+    severity: WARNING
+    message: Admin route may be missing role validation.
+    paths:
+      include:
+        - "**/src/routes/_authenticated/admin/**"
+
+    patterns:
+      - pattern: |
+          export const Route = ...
+      - pattern-not-regex: role|admin
+
+  - id: async-useeffect
+    languages:
+      - typescript
+    severity: WARNING
+    message: Avoid async directly inside useEffect.
+    patterns:
+      - pattern: |
+          useEffect(async (...) => {
+            ...
+          }, ...)
+
+  - id: api-input-without-validation
+    languages:
+      - typescript
+    severity: WARNING
+    message: API handler may lack schema validation.
+    patterns:
+      - pattern-either:
+          - pattern: |
+              request.json()
+          - pattern: |
+              await request.json()
+      - pattern-not-regex: zod|safeParse|parse
