@@ -395,6 +395,7 @@ Contoh penggunaan:
             'deepseek-ai/deepseek-v4-pro',
             'meta/llama-3.3-70b-instruct',
             'mistralai/codestral-22b-instruct-v0.1',
+            'microsoft/phi-4-mini-instruct'
         ],
         help='Model Gemini yang digunakan (default: qwen3-coder)'
     )
